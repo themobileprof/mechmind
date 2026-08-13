@@ -1,6 +1,6 @@
-# Optional: stable symlink for common USB-serial OBD chips.
+# MechMind — optional stable symlink for common USB-serial OBD chips.
 # Install:
-#   sudo cp deploy/udev/99-autoservice-obd.rules /etc/udev/rules.d/
+#   sudo cp deploy/udev/99-mechmind-obd.rules /etc/udev/rules.d/
 #   sudo udevadm control --reload-rules
 #   sudo udevadm trigger
 #

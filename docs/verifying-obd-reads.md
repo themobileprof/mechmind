@@ -1,4 +1,4 @@
-# Verifying real OBD-II reads
+# Verifying real OBD-II reads (MechMind)
 
 Use this checklist so you can tell **hardware truth** from **mock / overrides**.
 

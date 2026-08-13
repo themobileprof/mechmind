@@ -1,6 +1,6 @@
 # Vehicle enrichment sources — how to get them
 
-This guide covers **how to obtain** the data that makes Autoservice more informational than a generic OBD code reader, and **where it should live** in our architecture.
+This guide covers **how to obtain** the data that makes **MechMind** more informational than a generic OBD code reader, and **where it should live** in our architecture.
 
 ## Deployment focus (Nigeria)
 
@@ -56,7 +56,7 @@ curl -s -X POST "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVINValuesBatch/" 
   -d "data=${VIN};5YJSA1E11FF000000;"
 ```
 
-### Map into Autoservice
+### Map into MechMind
 
 On `POST /v1/scans` (after VIN is known), call vPIC from the **API**, then update:
 
@@ -107,7 +107,7 @@ Complaints (optional context, same family of APIs):
 curl -s "https://api.nhtsa.gov/complaints/complaintsByVehicle?make=${MAKE}&model=${MODEL}&modelYear=${YEAR}" | jq .
 ```
 
-### Map into Autoservice
+### Map into MechMind
 
 - Table idea: `vehicle_recalls (vehicle_id, campaign_number, component, summary, remedy, report_received, raw jsonb, fetched_at)`
 - Attach a `recalls[]` section on `GET /v1/codes/{code}/explain?vin=` and on vehicle history UI.
@@ -137,7 +137,7 @@ curl -s "https://www.fueleconomy.gov/ws/rest/vehicle/menu/make?year=2012" -H 'Ac
 # curl -s "https://www.fueleconomy.gov/ws/rest/vehicle/VEHICLE_ID" -H 'Accept: application/json'
 ```
 
-### Map into Autoservice
+### Map into MechMind
 
 Optional fields on `vehicles` or `vehicles.enrichment`: `epa_id`, `city_mpg`, `hwy_mpg`.  
 Low priority vs NHTSA VIN + recalls.
@@ -197,7 +197,7 @@ Store normalized fields + `provider` + `fetched_at`. Never put the vendor API ke
 
 1. Tech uses vendor tool as licensed.
 2. Tech (or integrator under contract) writes a **short derived note** into `knowledge_articles` (symptoms, tests that worked, parts).
-3. Autoservice cites *your* article + scan history — not “ALLDATA page 12.”
+3. MechMind cites *your* article + scan history — not “ALLDATA page 12.”
 
 If you want automated ingest, talk to their partnership / API teams first and get written redistribution terms.
 

@@ -252,7 +252,7 @@ func tokenPath() string {
 	if err != nil {
 		dir = os.TempDir()
 	}
-	return filepath.Join(dir, "autoservice", "token")
+	return filepath.Join(dir, "mechmind", "token")
 }
 
 func saveToken(tok string) error {

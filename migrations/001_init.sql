@@ -1,4 +1,4 @@
--- Autoservice schema: orgs, auth, vehicles, scans, knowledge
+# Autoservice/MechMind schema: orgs, auth, vehicles, scans, knowledge
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 

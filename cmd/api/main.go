@@ -52,7 +52,7 @@ func main() {
 	if err := enrichment.EnqueueSeed(ctx, st); err != nil {
 		log.Printf("enrichment seed enqueue: %v", err)
 	} else {
-		log.Printf("enrichment worker started (NG top-5 makes, 2010+ lean NHTSA data)")
+		log.Printf("MechMind enrichment worker started (NG top-5 makes, 2010+ lean NHTSA data)")
 	}
 
 	srv := &api.Server{Store: st, Auth: authMgr}
@@ -63,7 +63,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("api listening on %s", cfg.HTTPAddr)
+		log.Printf("MechMind API listening on %s", cfg.HTTPAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %v", err)
 		}

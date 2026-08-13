@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Ubuntu USB OBD-II preflight + optional live scan.
+# MechMind — Ubuntu USB OBD-II preflight + optional live scan.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+echo "== MechMind USB preflight =="
 echo "== user / serial permissions =="
 id
 if groups | grep -qw dialout; then
@@ -24,7 +25,7 @@ echo "== recent USB serial kernel messages =="
 dmesg -T 2>/dev/null | grep -Ei 'ttyUSB|ttyACM|FTDI|cp210|ch340|cdc_acm|PL2303' | tail -n 20 || true
 
 echo
-echo "== building obdctl =="
+echo "== building MechMind obdctl =="
 go build -o bin/obdctl ./cmd/obdctl
 
 echo
@@ -36,11 +37,12 @@ BAUD="${2:-38400}"
 
 if [[ -z "$DEVICE" ]]; then
   echo
-  echo "Usage for a live read:"
+  echo "Usage for a live MechMind read:"
   echo "  $0 /dev/ttyUSB0 [baud]"
   echo "Common baud rates: 38400 (default), 9600, 115200"
   echo
   echo "Vehicle must be: OBD port connected, ignition ON (engine running optional)."
+  echo "Do not pass a VIN override when validating hardware — see docs/verifying-obd-reads.md"
   exit 0
 fi
 

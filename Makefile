@@ -1,4 +1,4 @@
-.PHONY: tidy build api obdctl mock-scan migrate enrich-seed enrich-drain enrich-stats test
+.PHONY: tidy build api obdctl mock-scan migrate enrich-seed enrich-drain enrich-stats test install
 
 tidy:
 	go mod tidy
@@ -7,6 +7,12 @@ build: tidy
 	go build -o bin/api ./cmd/api
 	go build -o bin/obdctl ./cmd/obdctl
 	go build -o bin/enrichctl ./cmd/enrichctl
+
+install: build
+	install -d $(DESTDIR)/usr/local/bin
+	install -m 755 bin/api $(DESTDIR)/usr/local/bin/mechmind-api
+	install -m 755 bin/obdctl $(DESTDIR)/usr/local/bin/mechmind-obdctl
+	install -m 755 bin/enrichctl $(DESTDIR)/usr/local/bin/mechmind-enrichctl
 
 api: tidy
 	go run ./cmd/api
