@@ -17,6 +17,7 @@ import (
 	"github.com/autoservice/autoservice/internal/auth"
 	"github.com/autoservice/autoservice/internal/diagnosis"
 	"github.com/autoservice/autoservice/internal/enrichment"
+	"github.com/autoservice/autoservice/internal/explain"
 	"github.com/autoservice/autoservice/internal/store"
 	"github.com/autoservice/autoservice/pkg/obd"
 )
@@ -26,8 +27,9 @@ type ctxKey int
 const claimsKey ctxKey = 1
 
 type Server struct {
-	Store *store.Store
-	Auth  *auth.Manager
+	Store    *store.Store
+	Auth     *auth.Manager
+	Narrator *explain.Narrator
 }
 
 func (s *Server) Router() http.Handler {
@@ -311,6 +313,9 @@ func (s *Server) listVehicleScans(w http.ResponseWriter, r *http.Request) {
 func (s *Server) explainCode(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 	vin := r.URL.Query().Get("vin")
+	wantNarrative := r.URL.Query().Get("narrative") == "1" || r.URL.Query().Get("narrative") == "true"
+	forceNarrative := r.URL.Query().Get("force_narrative") == "1" || r.URL.Query().Get("force_narrative") == "true"
+
 	c := claimsFrom(r)
 	var orgFilter *uuid.UUID
 	if c.Role != auth.RoleSuperAdmin && c.OrgID != "" {
@@ -341,6 +346,7 @@ func (s *Server) explainCode(w http.ResponseWriter, r *http.Request) {
 		Observations: exp.Observations,
 		CoOccur:      co,
 	})
+
 	out := map[string]any{
 		"code":                exp.Code,
 		"generic_description": exp.Generic,
@@ -353,6 +359,23 @@ func (s *Server) explainCode(w http.ResponseWriter, r *http.Request) {
 		"co_occurrence":       exp.CoOccurrence,
 		"findings":            findings,
 	}
+
+	// Always expose the lean LLM packet so clients can see/audit what would be sent.
+	packet := explain.BuildPacket(explain.BuildInput{
+		Code:     code,
+		Findings: findings,
+		Article:  exp.Article,
+		Vehicle:  exp.Vehicle,
+		CoOccur:  exp.CoOccurrence,
+		History:  exp.History,
+	})
+	out["llm_packet"] = packet
+
+	if wantNarrative && s.Narrator != nil {
+		narr := s.Narrator.Narrate(r.Context(), packet, forceNarrative)
+		out["narrative"] = narr
+	}
+
 	writeJSON(w, http.StatusOK, out)
 }
 

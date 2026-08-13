@@ -14,6 +14,7 @@ import (
 	"github.com/autoservice/autoservice/internal/auth"
 	"github.com/autoservice/autoservice/internal/config"
 	"github.com/autoservice/autoservice/internal/enrichment"
+	"github.com/autoservice/autoservice/internal/explain"
 	"github.com/autoservice/autoservice/internal/store"
 )
 
@@ -55,7 +56,16 @@ func main() {
 		log.Printf("MechMind enrichment worker started (NG top-5 makes, 2010+ lean NHTSA data)")
 	}
 
-	srv := &api.Server{Store: st, Auth: authMgr}
+	srv := &api.Server{
+		Store: st,
+		Auth:  authMgr,
+		Narrator: explain.NewNarrator(
+			cfg.LLMEnabled,
+			cfg.LLMAPIKey,
+			cfg.LLMBaseURL,
+			cfg.LLMModel,
+		),
+	}
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv.Router(),
@@ -63,7 +73,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("MechMind API listening on %s", cfg.HTTPAddr)
+		log.Printf("MechMind API listening on %s (llm=%v)", cfg.HTTPAddr, cfg.LLMEnabled && cfg.LLMAPIKey != "")
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %v", err)
 		}

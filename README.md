@@ -58,7 +58,9 @@ curl -s http://localhost:8080/v1/auth/register -H 'Content-Type: application/jso
 ## Software diagnosis
 
 Scans store an `observations` pack (live PIDs, freeze-frames, link metrics).  
-`GET /v1/codes/{code}/explain?vin=` returns rule-based `findings` plus fleet `co_occurrence`.
+`GET /v1/codes/{code}/explain?vin=` returns rule-based `findings` plus fleet `co_occurrence`, and always includes a lean `llm_packet`.
+
+Optional prose: `&narrative=1` (requires `LLM_ENABLED=true`). See [docs/llm-context.md](docs/llm-context.md).
 
 ## Verifying OBD hardware
 

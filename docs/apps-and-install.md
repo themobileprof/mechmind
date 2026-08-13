@@ -103,6 +103,7 @@ Important variables:
 | `JWT_SECRET` | Required — sign tokens |
 | `BOOTSTRAP_ADMIN_EMAIL` / `PASSWORD` | First `super_admin` if none exists |
 | `API_URL` | Used by clients (default `http://localhost:8080`) |
+| `LLM_ENABLED` / `LLM_API_KEY` / `LLM_MODEL` | Optional bay narrative (`&narrative=1`); see [llm-context.md](llm-context.md) |
 
 ### Install / run
 
