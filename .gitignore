@@ -1,0 +1,7 @@
+bin/
+.env
+*.exe
+dist/
+node_modules/
+apps/desktop/frontend/dist/
+apps/desktop/build/
