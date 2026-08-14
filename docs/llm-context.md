@@ -47,11 +47,11 @@ Identical packets are **cached** in-process by fingerprint (24h).
 ```bash
 LLM_ENABLED=true
 LLM_API_KEY=sk-...
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-chat
 ```
 
-OpenAI-compatible bases work (same `/chat/completions` shape).
+OpenAI-compatible bases work (same `/chat/completions` shape). DeepSeek is the documented default; Anthropic/Gemini need a different client and are not wired.
 
 ## Design note
 
