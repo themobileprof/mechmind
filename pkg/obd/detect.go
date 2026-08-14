@@ -49,6 +49,18 @@ func ClassifyUSBIdentity(vid, pid, manufacturer, product string) AdapterKind {
 	return KindELMCandidate
 }
 
+// USBNickname is a human name for known OBD USB IDs (not a protocol claim).
+func USBNickname(vid, pid string) string {
+	switch strings.ToLower(strings.TrimSpace(vid) + ":" + strings.TrimSpace(pid)) {
+	case "0918:7104":
+		return "QBD"
+	case "0403:cc4d":
+		return "Tactrix OpenPort"
+	default:
+		return ""
+	}
+}
+
 func (p SerialPort) DisplayLabel() string {
 	if p.Label != "" {
 		return p.Label
@@ -61,10 +73,16 @@ func (p SerialPort) DisplayLabel() string {
 		}
 		return p.Path + " — OpenPort / J2534 (not ELM) " + id
 	case KindELMCandidate:
-		if p.VID != "" {
+		nick := USBNickname(p.VID, p.PID)
+		id := strings.TrimSpace(p.VID + ":" + p.PID)
+		switch {
+		case nick != "" && id != ":":
+			return p.Path + " — " + nick + " ELM-class " + id
+		case p.VID != "":
 			return p.Path + " — ELM-class " + p.VID + ":" + p.PID
+		default:
+			return p.Path + " — ELM-class"
 		}
-		return p.Path + " — ELM-class"
 	default:
 		return p.Path
 	}

@@ -46,13 +46,14 @@ Failure modes that are **honest** (good signals):
 
 ## Adapter classes
 
-MechMind’s USB path speaks **ELM327 AT commands** (the second dongle that answered `ELM327 v1.5`).
+MechMind’s USB path speaks **ELM327 AT commands** (the QBD `0918:7104` that answered `ELM327 v1.5`). Init tries **ATI first**, then a warm start / **ATZ** only if there is no ELM banner. After a scan it **parks** the chip (`ATWS`) so the next scan is not wedged. Vehicle talk tries **CAN 11/500, then 29/500, 11/250, 29/250**, and only then ELM automatic — cheap v1.5 clones often return `SEARCHING... UNABLE TO CONNECT` on `ATSP0` even when the ECU is present.
 
 A **Tactrix OpenPort 2.0** (including Revision E clones) is a **J2534** pass-through. It often shows up as `/dev/ttyACM0` too, but it will not answer `ATI`/`ATZ`. MechMind **detects** typical OpenPort USB IDs (`0403:cc4d` or a Tactrix/OpenPort product string) and refuses the ELM scan path instead of hanging.
 
 | Dongle | Speaks | Use with MechMind today |
 |---|---|---|
 | ELM327 / STN11xx USB | AT commands + Mode 01/03/09 | Yes |
+| QBD `0918:7104` | CDC-ACM virtual COM; ELM only if firmware answers `ATI` | Only if it prints `ELM327` |
 | OpenPort 2.0 / J2534 | PassThru API (not ELM) | Not yet |
 | Bluetooth ELM | Same as USB ELM | Later |
 

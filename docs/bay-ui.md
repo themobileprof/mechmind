@@ -43,7 +43,7 @@ The MechMind **API must already be running** (default `http://localhost:8080`). 
 2. Open **MechMind Bay** (browser should open `http://127.0.0.1:8787/`).
 3. **New shop** (first time) — bootstrap `super_admin` cannot upload scans. Create a shop, or sign in as an existing technician.
 4. Adapter: **Live USB (car)**. Refresh ports. Pick `/dev/ttyUSB0`, `/dev/ttyACM0`, or `/dev/obd0`.
-5. **Scan vehicle**. The right pane lists each step (open port, baud, ATI, VIN, codes). Cheap USB clones hang on **ATZ**, so MechMind skips it and tries 38400 / 115200 / 9600. The scan stops itself after **35 seconds**. Use **Cancel scan** to stop sooner. Do not type a VIN.
+5. **Scan vehicle**. The right pane lists each step (open port, USB id, baud, ATI, ATZ if needed, VIN, codes). ATI is tried first; ATZ only if there is no ELM banner. A wedged serial port is abandoned instead of hanging Close for 30s. The scan stops itself after **50 seconds**. Use **Cancel scan** to stop sooner. Do not type a VIN.
 
 Success: stamped VIN plate shows a 17-character ECU VIN (not `MOCK…`). Empty DTCs on a healthy car is still a good read.
 

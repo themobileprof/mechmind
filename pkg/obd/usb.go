@@ -3,6 +3,7 @@ package obd
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -83,41 +84,64 @@ func (u *USBAdapter) Open(ctx context.Context) error {
 	if u.DevicePath == "" {
 		return fmt.Errorf("usb device path is required")
 	}
-	if info := InspectSerialPort(u.DevicePath); info.Kind == KindJ2534OpenPort {
+	info := InspectSerialPort(u.DevicePath)
+	if info.Kind == KindJ2534OpenPort {
 		return fmt.Errorf("%w (%s %s:%s %s)", ErrJ2534Unsupported, info.Path, info.VID, info.PID, info.Product)
 	}
+	if info.VID != "" {
+		nick := USBNickname(info.VID, info.PID)
+		if nick != "" {
+			u.report(fmt.Sprintf("USB %s:%s %s (%s)", info.VID, info.PID, info.Kind, nick))
+		} else {
+			u.report(fmt.Sprintf("USB %s:%s %s", info.VID, info.PID, info.Kind))
+		}
+	}
+
+	bauds := u.baudCandidates()
+	if len(bauds) == 0 {
+		bauds = []int{38400}
+	}
+	u.report(fmt.Sprintf("Opening %s at %d baud", u.DevicePath, bauds[0]))
+	if err := u.openPort(ctx, bauds[0]); err != nil {
+		return err
+	}
+	u.raiseModemLines()
 
 	var last error
-	bauds := u.baudCandidates()
 	for i, baud := range bauds {
 		if err := ctx.Err(); err != nil {
+			u.abandonPort()
 			return err
 		}
-		u.report(fmt.Sprintf("Opening %s at %d baud (%d/%d)", u.DevicePath, baud, i+1, len(bauds)))
-		if err := u.openPort(ctx, baud); err != nil {
-			last = err
-			u.report(err.Error())
-			continue
+		if i > 0 {
+			u.report(fmt.Sprintf("Trying %d baud (%d/%d) without reopening", baud, i+1, len(bauds)))
+			if err := u.setBaud(baud); err != nil {
+				last = err
+				u.report(err.Error())
+				continue
+			}
 		}
 		if err := u.initELM(ctx); err != nil {
 			last = err
-			_ = u.Close()
 			u.report(fmt.Sprintf("%d baud: %s", baud, err.Error()))
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(350 * time.Millisecond):
+			if errors.Is(err, errStuckSerial) {
+				u.abandonPort()
+				return fmt.Errorf("%s: %w — unplug/replug the adapter", u.DevicePath, err)
 			}
 			continue
 		}
-		u.Baud = baud
 		u.mu.Lock()
 		u.ready = true
 		u.mu.Unlock()
 		return nil
 	}
+	u.abandonPort()
 	if last == nil {
 		last = fmt.Errorf("no response")
+	}
+	id := strings.TrimSpace(info.VID + ":" + info.PID)
+	if nick := USBNickname(info.VID, info.PID); nick != "" && id != ":" {
+		return fmt.Errorf("%s [%s %s]: %w — no ELM banner; unplug/replug, or use the dongle that answered ELM327 v1.5", u.DevicePath, nick, id, last)
 	}
 	return fmt.Errorf("%s: %w — unplug/replug the adapter, ignition ON, then try again", u.DevicePath, last)
 }
@@ -127,6 +151,10 @@ func (u *USBAdapter) openPort(ctx context.Context, baud int) error {
 		port serial.Port
 		err  error
 	}
+	// QBD/CDC-ACM can take ~10s to open; do not wait for the 50s scan budget.
+	openCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+
 	ch := make(chan opened, 1)
 	go func() {
 		p, err := serial.Open(u.DevicePath, &serial.Mode{BaudRate: baud})
@@ -135,14 +163,15 @@ func (u *USBAdapter) openPort(ctx context.Context, baud int) error {
 
 	var port serial.Port
 	select {
-	case <-ctx.Done():
+	case <-openCtx.Done():
 		go func() {
 			o := <-ch
-			if o.port != nil {
-				_ = o.port.Close()
-			}
+			closeSerialAsync(o.port)
 		}()
-		return fmt.Errorf("open %s: %w", u.DevicePath, ctx.Err())
+		if ctx.Err() != nil {
+			return fmt.Errorf("open %s: %w", u.DevicePath, ctx.Err())
+		}
+		return fmt.Errorf("open %s: timed out after 12s — unplug/replug the adapter", u.DevicePath)
 	case o := <-ch:
 		if o.err != nil {
 			return fmt.Errorf("open %s: %w", u.DevicePath, o.err)
@@ -153,33 +182,45 @@ func (u *USBAdapter) openPort(ctx context.Context, baud int) error {
 	_ = port.SetReadTimeout(150 * time.Millisecond)
 	u.mu.Lock()
 	u.port = port
+	u.Baud = baud
 	u.rw = bufio.NewReadWriter(bufio.NewReader(port), bufio.NewWriter(port))
 	u.mu.Unlock()
 	return nil
 }
 
-func (u *USBAdapter) forceClosePort() {
+// abandonPort drops the handle without waiting. unix serial Close can block
+// ~30s on a wedged CDC-ACM (J2534 clones, USB-reset mid-read).
+func (u *USBAdapter) abandonPort() {
 	u.mu.Lock()
 	p := u.port
 	u.port = nil
 	u.rw = nil
+	u.ready = false
 	u.mu.Unlock()
-	if p != nil {
-		_ = p.Close()
-	}
+	closeSerialAsync(p)
 }
 
 func (u *USBAdapter) Close() error {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.ready = false
-	if u.port == nil {
-		return nil
+	u.parkAdapter()
+	u.abandonPort()
+	return nil
+}
+
+func (u *USBAdapter) parkAdapter() {
+	if !u.portOpen() {
+		return
 	}
-	err := u.port.Close()
-	u.port = nil
-	u.rw = nil
-	return err
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	u.report("Parking adapter")
+	_, _ = u.command(ctx, "ATWS")
+}
+
+func closeSerialAsync(p serial.Port) {
+	if p == nil {
+		return
+	}
+	go func() { _ = p.Close() }()
 }
 
 func (u *USBAdapter) portOpen() bool {
@@ -188,19 +229,46 @@ func (u *USBAdapter) portOpen() bool {
 	return u.port != nil
 }
 
+func (u *USBAdapter) setBaud(baud int) error {
+	u.mu.Lock()
+	port := u.port
+	u.mu.Unlock()
+	if port == nil {
+		return fmt.Errorf("adapter not open")
+	}
+	if err := port.SetMode(&serial.Mode{BaudRate: baud}); err != nil {
+		return fmt.Errorf("set baud %d: %w", baud, err)
+	}
+	u.Baud = baud
+	_ = port.ResetInputBuffer()
+	_ = port.ResetOutputBuffer()
+	return nil
+}
+
+func (u *USBAdapter) raiseModemLines() {
+	u.mu.Lock()
+	port := u.port
+	u.mu.Unlock()
+	if port == nil {
+		return
+	}
+	_ = port.SetDTR(true)
+	_ = port.SetRTS(true)
+}
+
 func (u *USBAdapter) Identify(ctx context.Context) (VehicleInfo, error) {
 	if err := u.ensureOpen(ctx); err != nil {
 		return VehicleInfo{}, err
 	}
-	// First OBD command after ATSP0 runs ELM protocol search (SEARCHING...).
-	// That can take ~10–15s. Do it once, on 0100, not on VIN — and do not
-	// tear down the serial port if VIN is slow or missing.
-	u.report("Searching vehicle bus (up to 15s — keep ignition ON)")
-	if _, err := u.command(ctx, "0100"); err != nil {
-		return VehicleInfo{}, fmt.Errorf("no ECU on the bus: %w — ignition ON, wait a few seconds after turning the key", err)
+	proto, err := u.findBus(ctx)
+	if err != nil {
+		return VehicleInfo{}, err
 	}
 	u.report("Asking ECU for protocol")
-	proto, _ := u.command(ctx, "ATDP")
+	desc, _ := u.command(ctx, "ATDP")
+	if strings.TrimSpace(desc) == "" || strings.Contains(strings.ToUpper(desc), "AUTO") {
+		desc = proto
+	}
 	u.report("Asking ECU for VIN")
 	vin, verr := u.readVIN(ctx)
 	if verr != nil {
@@ -211,9 +279,63 @@ func (u *USBAdapter) Identify(ctx context.Context) (VehicleInfo, error) {
 	}
 	return VehicleInfo{
 		VIN:   strings.TrimSpace(vin),
-		Proto: strings.TrimSpace(proto),
+		Proto: strings.TrimSpace(desc),
 		ECU:   "ELM327",
 	}, nil
+}
+
+type elmBusProto struct {
+	Code string
+	Name string
+}
+
+// Phase 1 cars (2010+) are CAN. ATSP0 auto-search on cheap v1.5 clones often
+// returns SEARCHING / UNABLE TO CONNECT even when the ECU is there.
+var elmBusProtocols = []elmBusProto{
+	{"6", "ISO 15765-4 CAN 11/500"},
+	{"7", "ISO 15765-4 CAN 29/500"},
+	{"8", "ISO 15765-4 CAN 11/250"},
+	{"9", "ISO 15765-4 CAN 29/250"},
+	{"0", "automatic"},
+}
+
+func pid0100Supported(resp string) bool {
+	u := strings.ToUpper(strings.ReplaceAll(resp, " ", ""))
+	if u == "" || strings.Contains(u, "UNABLE") || strings.Contains(u, "ERROR") || strings.Contains(u, "NODATA") {
+		return false
+	}
+	return strings.Contains(u, "4100")
+}
+
+func (u *USBAdapter) findBus(ctx context.Context) (string, error) {
+	var last error
+	for _, p := range elmBusProtocols {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		u.report("Trying " + p.Name)
+		if _, err := u.command(ctx, "ATSP"+p.Code); err != nil {
+			last = err
+			u.report(p.Name + ": " + err.Error())
+			continue
+		}
+		resp, err := u.command(ctx, "0100")
+		if pid0100Supported(resp) {
+			u.report("ECU answered on " + p.Name)
+			return p.Name, nil
+		}
+		if err != nil {
+			last = err
+			u.report(p.Name + ": " + clipLog(err.Error(), 80))
+			continue
+		}
+		last = fmt.Errorf("no PID 00 (%q)", clipLog(resp, 40))
+		u.report(p.Name + ": " + last.Error())
+	}
+	if last == nil {
+		last = fmt.Errorf("no response")
+	}
+	return "", fmt.Errorf("no ECU on the bus (%w) — ignition ON, wait a few seconds after turning the key", last)
 }
 
 func (u *USBAdapter) ReadDTCs(ctx context.Context) ([]DTC, error) {
@@ -291,31 +413,72 @@ func (u *USBAdapter) ensureOpen(ctx context.Context) error {
 }
 
 func (u *USBAdapter) initELM(ctx context.Context) error {
-	// Do not send ATZ on USB. Cheap CDC-ACM clones USB-reset on ATZ, the
-	// old ttyACM fd dies, and Read hangs until the whole scan times out.
-	u.report("Waking adapter (skipping ATZ)")
+	u.report("Waking adapter")
 	if err := u.wake(ctx); err != nil {
 		return err
 	}
-	u.report("Adapter ATI")
-	id, err := u.commandTimed(ctx, "ATI", true)
+	// Previous Close often pulses DTR; cheap CDC clones need a moment to boot.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	var id string
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		u.report("Adapter ATI")
+		id, err = u.command(ctx, "ATI")
+		if errors.Is(err, errStuckSerial) {
+			return err
+		}
+		if looksLikeELM(id) {
+			break
+		}
+		if attempt < 3 {
+			u.report("ATI quiet, retrying")
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(400 * time.Millisecond):
+			}
+			_ = u.wake(ctx)
+		}
+	}
+	if !looksLikeELM(id) {
+		u.report("No ELM banner from ATI — warm start")
+		wid, werr := u.command(ctx, "ATWS")
+		if errors.Is(werr, errStuckSerial) {
+			return werr
+		}
+		if looksLikeELM(wid) {
+			id, err = wid, nil
+		} else {
+			u.report("No ELM banner after ATWS — trying ATZ")
+			zid, zerr := u.command(ctx, "ATZ")
+			if errors.Is(zerr, errStuckSerial) {
+				return zerr
+			}
+			if looksLikeELM(zid) {
+				id, err = zid, nil
+			} else if isPortDead(zerr) || isPortDead(err) || isPortDead(werr) {
+				return u.reopenAfterUSBReset(ctx)
+			} else if zerr != nil {
+				return fmt.Errorf("ATZ: %w", zerr)
+			} else if werr != nil {
+				return fmt.Errorf("ATWS: %w", werr)
+			} else if err != nil {
+				return fmt.Errorf("ATI: %w", err)
+			} else {
+				return fmt.Errorf("not an ELM prompt (%q)", clipLog(zid, 80))
+			}
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("ATI: %w", err)
 	}
-	if !looksLikeELM(id) {
-		return fmt.Errorf("not an ELM prompt (%q)", clipLog(id, 80))
-	}
 	u.report("ELM identified: " + clipLog(id, 60))
-	for _, c := range []string{"ATE0", "ATL0", "ATS0", "ATH0", "ATAL", "ATSP0"} {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		u.report("Adapter " + c)
-		if _, err := u.command(ctx, c); err != nil {
-			return fmt.Errorf("init %s: %w", c, err)
-		}
-	}
-	return nil
+	return u.configureELM(ctx)
 }
 
 func (u *USBAdapter) wake(ctx context.Context) error {
@@ -335,6 +498,73 @@ func (u *USBAdapter) wake(ctx context.Context) error {
 	return nil
 }
 
+func (u *USBAdapter) reopenAfterUSBReset(ctx context.Context) error {
+	baud := u.Baud
+	u.abandonPort()
+	u.report("Adapter USB-reset after ATZ; waiting for the port")
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if _, err := os.Stat(u.DevicePath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("ATZ: %s did not reappear", u.DevicePath)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	if err := u.openPort(ctx, baud); err != nil {
+		return err
+	}
+	if err := u.wake(ctx); err != nil {
+		return err
+	}
+	u.report("Adapter ATI")
+	id, err := u.command(ctx, "ATI")
+	if err != nil {
+		return fmt.Errorf("ATI after ATZ: %w", err)
+	}
+	if !looksLikeELM(id) {
+		return fmt.Errorf("not an ELM prompt after ATZ (%q)", clipLog(id, 80))
+	}
+	u.report("ELM identified: " + clipLog(id, 60))
+	return u.configureELM(ctx)
+}
+
+func (u *USBAdapter) configureELM(ctx context.Context) error {
+	for _, c := range []string{"ATE0", "ATL0", "ATS0", "ATH0", "ATAL"} {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		u.report("Adapter " + c)
+		if _, err := u.command(ctx, c); err != nil {
+			return fmt.Errorf("init %s: %w", c, err)
+		}
+	}
+	// Max adaptive timeout; clones often ignore this.
+	_, _ = u.command(ctx, "ATSTFF")
+	return nil
+}
+
+func isPortDead(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "closed") ||
+		strings.Contains(s, "disconnected") ||
+		strings.Contains(s, "no such file")
+}
+
 func (u *USBAdapter) readVIN(ctx context.Context) (string, error) {
 	// Mode 09 PID 02 — VIN. Many ECUs return multi-frame; we do a best-effort parse.
 	resp, err := u.command(ctx, "0902")
@@ -346,8 +576,12 @@ func (u *USBAdapter) readVIN(ctx context.Context) (string, error) {
 
 func commandWait(cmd string) time.Duration {
 	switch cmd {
+	case "ATZ":
+		return 2 * time.Second
+	case "ATWS":
+		return 1500 * time.Millisecond
 	case "0100":
-		return 15 * time.Second
+		return 8 * time.Second
 	case "0902":
 		return 8 * time.Second
 	case "03", "07", "0A":
@@ -362,11 +596,9 @@ func commandWait(cmd string) time.Duration {
 	}
 }
 
-func (u *USBAdapter) command(ctx context.Context, cmd string) (string, error) {
-	return u.commandTimed(ctx, cmd, false)
-}
+var errStuckSerial = fmt.Errorf("serial read stuck in the kernel (Close would hang)")
 
-func (u *USBAdapter) commandTimed(ctx context.Context, cmd string, killOnTimeout bool) (string, error) {
+func (u *USBAdapter) command(ctx context.Context, cmd string) (string, error) {
 	u.mu.Lock()
 	port := u.port
 	u.mu.Unlock()
@@ -396,21 +628,19 @@ func (u *USBAdapter) commandTimed(ctx context.Context, cmd string, killOnTimeout
 	var raw string
 	select {
 	case <-cmdCtx.Done():
-		if killOnTimeout {
-			u.forceClosePort()
-		}
+		// Do not Close() here. go.bug.st/serial Close waits for Read, and a
+		// wedged CDC-ACM Read can sit in kernel select for ~30s.
 		select {
 		case o := <-ch:
 			if o.s != "" {
 				raw = o.s
 				break
 			}
-		case <-time.After(200 * time.Millisecond):
-			if killOnTimeout {
+			if raw == "" {
 				return "", fmt.Errorf("no prompt for %s within %s", cmd, wait)
 			}
-			u.forceClosePort()
-			return "", fmt.Errorf("no prompt for %s within %s", cmd, wait)
+		case <-time.After(250 * time.Millisecond):
+			return "", fmt.Errorf("%w: no prompt for %s within %s", errStuckSerial, cmd, wait)
 		}
 		if raw == "" {
 			return "", fmt.Errorf("no prompt for %s within %s", cmd, wait)
@@ -450,11 +680,11 @@ func (u *USBAdapter) readUntilPrompt(ctx context.Context, port serial.Port) (str
 				return b.String(), nil
 			}
 		}
-		if err == io.EOF {
+		if err == io.EOF || isPortDead(err) {
 			if b.Len() > 0 {
 				return b.String(), nil
 			}
-			return "", io.EOF
+			return "", err
 		}
 	}
 }

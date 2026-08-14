@@ -21,6 +21,9 @@ func TestClassifyUSBIdentityOpenPort(t *testing.T) {
 	if ClassifyUSBIdentity("", "", "Tactrix", "Openport 2.0") != KindJ2534OpenPort {
 		t.Fatal("name-only Tactrix")
 	}
+	if USBNickname("0918", "7104") != "QBD" {
+		t.Fatal("QBD nickname")
+	}
 }
 
 func TestSerialPortLabel(t *testing.T) {

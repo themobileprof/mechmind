@@ -215,7 +215,7 @@
       </select>
       <button class="ghost" id="btn-refresh" type="button">Refresh ports</button>
       <button class="scan-paddle" id="btn-scan" type="button">Scan vehicle</button>
-      <p class="hint" id="adapter-hint">Ignition ON, wait a couple of seconds after the key. The first ECU talk can sit on “Searching vehicle bus” for up to 15s. Scan stops itself after 50 seconds.</p>
+      <p class="hint" id="adapter-hint">Ignition ON, wait a couple of seconds after the key. MechMind tries CAN protocols first (not ELM auto-search). Scan stops itself after 50 seconds.</p>
     </aside>
     <section class="stage">
       <div id="flash"></div>
@@ -311,7 +311,7 @@
       if (selectedKind() === "j2534_openport") {
         hint.textContent = "This port is a Tactrix OpenPort / J2534 adapter, not ELM327. MechMind cannot scan it yet. Plug in the ELM327-class dongle (the one that answered ELM327 v1.5).";
       } else {
-        hint.textContent = "Ignition ON, wait a couple of seconds after the key. The first ECU talk can sit on “Searching vehicle bus” for up to 15s. Scan stops itself after 50 seconds.";
+        hint.textContent = "Ignition ON, wait a couple of seconds after the key. MechMind tries CAN protocols first (not ELM auto-search). Scan stops itself after 50 seconds.";
       }
     }
 
@@ -338,7 +338,7 @@
         <p class="phase-now">${esc(st.phase || "Working")} · ${(elapsed/1000).toFixed(1)}s / ${(timeout/1000).toFixed(0)}s</p>
         <div class="meter"><i style="width:${pct}%"></i></div>
         <div class="logbox">${esc(log)}</div>
-        <p class="hint">Each line is a real adapter or API step. “Searching vehicle bus” can take up to 15s. The whole scan stops at 50s.</p>`;
+        <p class="hint">Each line is a real adapter or API step. CAN 11/500 is tried first. The whole scan stops at 50s.</p>`;
     }
 
     async function pollScan() {
