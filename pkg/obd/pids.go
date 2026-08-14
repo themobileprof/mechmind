@@ -35,6 +35,9 @@ func (u *USBAdapter) ReadLiveSnapshot(ctx context.Context) (*LiveSnapshot, error
 		{"0142", func(r string) { snap.ModuleVolts = decodeVoltage(r) }},
 	}
 	for _, p := range pids {
+		if err := ctx.Err(); err != nil {
+			return snap, nil
+		}
 		resp, err := u.command(ctx, p.cmd)
 		if err != nil || resp == "" || strings.Contains(strings.ToUpper(resp), "NO DATA") {
 			continue

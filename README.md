@@ -11,10 +11,12 @@
 | App | Binary (suggested) | Purpose |
 |---|---|---|
 | API | `mechmind-api` | Backend + enrichment worker |
-| obdctl | `mechmind-obdctl` | Technician USB / mock scanner |
+| bayui | `mechmind-bayui` | Local technician GUI (browser is display only) |
+| obdctl | `mechmind-obdctl` | Technician USB / mock scanner (CLI) |
 | enrichctl | `mechmind-enrichctl` | Enrichment seed / drain |
 
-**Full install guide:** [docs/apps-and-install.md](docs/apps-and-install.md)
+**Full install guide:** [docs/apps-and-install.md](docs/apps-and-install.md)  
+**Car test (GUI):** [docs/bay-ui.md](docs/bay-ui.md)
 
 ## Quick start
 
@@ -23,9 +25,7 @@ cp .env.example .env    # set JWT_SECRET and BOOTSTRAP_ADMIN_*
 make migrate
 make api                # http://localhost:8080
 
-# other terminal
-go run ./cmd/obdctl --login --email tech@demo.shop --password changeme123
-go run ./cmd/obdctl --mock
+sudo ./scripts/install-ubuntu.sh   # .deb → “MechMind Bay” in the app menu
 ```
 
 Register a shop first if needed:
@@ -51,7 +51,7 @@ curl -s http://localhost:8080/v1/auth/register -H 'Content-Type: application/jso
 
 | Layer | Owns |
 |---|---|
-| Local client (`obdctl` / future desktop) | USB/BT, ELM327, DTC decode, PID snapshot |
+| Local client (`bayui` / `obdctl`) | USB/BT, ELM327, DTC decode, PID snapshot |
 | MechMind API | Auth, orgs, scans, KB, enrichment, diagnosis findings |
 | 3rd-party LLM (later) | Grounded explanation text only |
 
@@ -68,10 +68,10 @@ Do not override a real car’s VIN when proving the USB link. Mock always uses `
 
 ```bash
 make mock-scan                             # software only
-go run ./cmd/obdctl --device /dev/ttyUSB0  # live ECU VIN + codes
+sudo ./scripts/install-ubuntu.sh           # then open MechMind Bay → Live USB
 ```
 
-Details: [docs/verifying-obd-reads.md](docs/verifying-obd-reads.md)
+Details: [docs/verifying-obd-reads.md](docs/verifying-obd-reads.md), [docs/bay-ui.md](docs/bay-ui.md)
 
 ## Market focus
 

@@ -63,17 +63,26 @@ type Adapter interface {
 
 // Scanner runs a diagnostic pass including live PID sampling when available.
 type Scanner struct {
-	Adapter Adapter
+	Adapter  Adapter
+	Progress func(string)
+}
+
+func (s *Scanner) report(msg string) {
+	if s.Progress != nil {
+		s.Progress(msg)
+	}
 }
 
 func (s *Scanner) Scan(ctx context.Context) (*ScanResult, error) {
 	start := time.Now()
 	metrics := &LinkMetrics{Notes: []string{}}
+	s.report("Opening adapter")
 	if err := s.Adapter.Open(ctx); err != nil {
 		return nil, err
 	}
 	defer s.Adapter.Close()
 
+	s.report("Reading VIN and protocol")
 	info, err := s.Adapter.Identify(ctx)
 	metrics.CommandAttempts++
 	if err != nil {
@@ -81,6 +90,7 @@ func (s *Scanner) Scan(ctx context.Context) (*ScanResult, error) {
 		return nil, err
 	}
 
+	s.report("Reading trouble codes")
 	dtcs, err := s.Adapter.ReadDTCs(ctx)
 	metrics.CommandAttempts++
 	if err != nil {
@@ -90,6 +100,10 @@ func (s *Scanner) Scan(ctx context.Context) (*ScanResult, error) {
 
 	ffMap := map[string]map[string]any{}
 	for i := range dtcs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		s.report("Freeze frame for " + dtcs[i].Code)
 		metrics.CommandAttempts++
 		ff, ferr := s.Adapter.ReadFreezeFrame(ctx, dtcs[i].Code)
 		if ferr != nil {
@@ -108,6 +122,7 @@ func (s *Scanner) Scan(ctx context.Context) (*ScanResult, error) {
 		Link:         metrics,
 	}
 	if sampler, ok := s.Adapter.(LiveSampler); ok {
+		s.report("Sampling live sensors")
 		metrics.CommandAttempts++
 		live, lerr := sampler.ReadLiveSnapshot(ctx)
 		if lerr != nil {

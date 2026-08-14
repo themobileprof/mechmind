@@ -2,7 +2,7 @@
 
 **MechMind** is a shop network for technicians: local OBD-II scanning, shared history, knowledge, and software diagnosis findings.
 
-This document lists **every runnable app** in the repo and how to install/run it on Linux (primary). Windows packaging is planned; the Go API and CLI build on Windows too once serial drivers are available.
+This document lists **every runnable app** in the repo and how to install/run it on Linux (primary). A Windows bay UI can be cross-compiled (`make bayui-windows`).
 
 ---
 
@@ -11,15 +11,16 @@ This document lists **every runnable app** in the repo and how to install/run it
 | App | Path | Who uses it | Role |
 |---|---|---|---|
 | **MechMind API** | `cmd/api` | All shops (server) | Auth, orgs, scans, explain, enrichment worker, diagnosis |
-| **obdctl** | `cmd/obdctl` | Technician laptop | Local USB/mock OBD client → uploads to API |
+| **bayui** | `cmd/bayui` | Technician laptop | Local GUI (browser display; this process owns USB) |
+| **obdctl** | `cmd/obdctl` | Technician laptop | Local USB/mock OBD CLI → uploads to API |
 | **enrichctl** | `cmd/enrichctl` | Ops / admin | Seed/drain NHTSA lean enrichment jobs |
 | **ubuntu-usb-check** | `scripts/ubuntu-usb-check.sh` | Technician | Serial permissions + live USB preflight |
 | **Postgres** | host or `docker-compose.yml` | API | System of record |
-| Desktop (Wails) | *planned* | Bay PC | GUI over the same OBD + API stack |
+| Desktop (Wails) | *planned* | Bay PC | Native window around the same local OBD stack |
 | Mobile companion | *planned* | Android bay | Bluetooth-first later |
 
 ```
-Vehicle ──USB──► obdctl (local) ──HTTPS──► MechMind API ──► Postgres
+Vehicle ──USB──► bayui / obdctl (local) ──HTTPS──► MechMind API ──► Postgres
                                       │
                                       ├── diagnosis findings
                                       ├── knowledge + history
@@ -192,6 +193,26 @@ mechmind-obdctl --device /dev/ttyUSB0
 
 See [verifying-obd-reads.md](verifying-obd-reads.md).
 
+### Bay GUI (same USB rules)
+
+Technician install (no Go on the laptop):
+
+```bash
+sudo ./scripts/install-ubuntu.sh
+# then open “MechMind Bay” from the app menu
+```
+
+Developer run-from-source:
+
+```bash
+make bayui
+# browser: http://127.0.0.1:8787/
+```
+
+A remote website cannot read the car. `bayui` is a local process that owns the serial port; the browser is only the screen. Full steps: [bay-ui.md](bay-ui.md).
+
+Windows: `make bayui-windows` → `bin/mechmind-bayui.exe` (no installer yet).
+
 ### Common flags
 
 | Flag | Meaning |
@@ -249,6 +270,7 @@ make build
 #   bin/api
 #   bin/obdctl
 #   bin/enrichctl
+#   bin/bayui
 ```
 
 Suggested install names:
@@ -257,6 +279,7 @@ Suggested install names:
 sudo install -m 755 bin/api        /usr/local/bin/mechmind-api
 sudo install -m 755 bin/obdctl     /usr/local/bin/mechmind-obdctl
 sudo install -m 755 bin/enrichctl  /usr/local/bin/mechmind-enrichctl
+sudo install -m 755 bin/bayui      /usr/local/bin/mechmind-bayui
 ```
 
 ---
@@ -266,10 +289,9 @@ sudo install -m 755 bin/enrichctl  /usr/local/bin/mechmind-enrichctl
 ```bash
 cp .env.example .env          # set JWT_SECRET + bootstrap admin
 make migrate
-make api                      # terminal 1
-# terminal 2:
-go run ./cmd/obdctl --login --email <admin-or-tech> --password <password>
-go run ./cmd/obdctl --mock
+make api                      # terminal 1 — API must stay running
+sudo ./scripts/install-ubuntu.sh
+# then open “MechMind Bay” from the app menu
 ```
 
 ---
@@ -278,9 +300,9 @@ go run ./cmd/obdctl --mock
 
 | App | Intent |
 |---|---|
-| **MechMind Desktop** (Wails + React) | Bay GUI: login, scan, findings, history |
+| **MechMind Desktop** (Wails) | Native window around the same local OBD stack |
 | **MechMind Mobile** | Android Bluetooth companion |
-| **Shop portal** | Browser history / reports |
+| **Shop portal** | Browser history / reports (no live USB) |
 
 Same API; only the client shell changes.
 
@@ -301,4 +323,5 @@ Same API; only the client shell changes.
 ## Related docs
 
 - [verifying-obd-reads.md](verifying-obd-reads.md) — mock vs real OBD proof
+- [bay-ui.md](bay-ui.md) — Ubuntu installer + live-car steps
 - [enrichment-sources.md](enrichment-sources.md) — NHTSA / data sources

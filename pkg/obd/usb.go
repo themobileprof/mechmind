@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ type USBAdapter struct {
 	DevicePath string
 	Baud       int
 	NameHint   string
+	Progress   func(string)
 
 	mu   sync.Mutex
 	port serial.Port
@@ -42,33 +44,67 @@ func (u *USBAdapter) Name() string {
 
 func (u *USBAdapter) LinkType() LinkType { return LinkUSB }
 
+func (u *USBAdapter) report(msg string) {
+	if u.Progress != nil {
+		u.Progress(msg)
+	}
+}
+
 func (u *USBAdapter) Open(ctx context.Context) error {
-	_ = ctx
 	u.mu.Lock()
-	defer u.mu.Unlock()
 	if u.port != nil {
+		u.mu.Unlock()
 		return nil
 	}
+	u.mu.Unlock()
+
 	if u.DevicePath == "" {
 		return fmt.Errorf("usb device path is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	baud := u.Baud
 	if baud == 0 {
 		baud = 38400
 	}
-	mode := &serial.Mode{BaudRate: baud}
-	port, err := serial.Open(u.DevicePath, mode)
-	if err != nil {
-		return fmt.Errorf("open %s: %w", u.DevicePath, err)
+	u.report("Opening " + u.DevicePath)
+
+	type opened struct {
+		port serial.Port
+		err  error
 	}
-	_ = port.SetReadTimeout(2 * time.Second)
+	ch := make(chan opened, 1)
+	go func() {
+		p, err := serial.Open(u.DevicePath, &serial.Mode{BaudRate: baud})
+		ch <- opened{p, err}
+	}()
+
+	var port serial.Port
+	select {
+	case <-ctx.Done():
+		go func() {
+			o := <-ch
+			if o.port != nil {
+				_ = o.port.Close()
+			}
+		}()
+		return fmt.Errorf("open %s: %w", u.DevicePath, ctx.Err())
+	case o := <-ch:
+		if o.err != nil {
+			return fmt.Errorf("open %s: %w", u.DevicePath, o.err)
+		}
+		port = o.port
+	}
+
+	_ = port.SetReadTimeout(400 * time.Millisecond)
+	u.mu.Lock()
 	u.port = port
 	u.rw = bufio.NewReadWriter(bufio.NewReader(port), bufio.NewWriter(port))
+	u.mu.Unlock()
 
-	if err := u.initELM(); err != nil {
-		_ = port.Close()
-		u.port = nil
-		u.rw = nil
+	if err := u.initELM(ctx); err != nil {
+		_ = u.Close()
 		return err
 	}
 	return nil
@@ -90,7 +126,9 @@ func (u *USBAdapter) Identify(ctx context.Context) (VehicleInfo, error) {
 	if err := u.ensureOpen(ctx); err != nil {
 		return VehicleInfo{}, err
 	}
+	u.report("Asking ECU for protocol")
 	proto, _ := u.command(ctx, "ATDP")
+	u.report("Asking ECU for VIN")
 	vin, _ := u.readVIN(ctx)
 	return VehicleInfo{
 		VIN:   strings.TrimSpace(vin),
@@ -167,17 +205,22 @@ func (u *USBAdapter) ensureOpen(ctx context.Context) error {
 	return u.Open(ctx)
 }
 
-func (u *USBAdapter) initELM() error {
+func (u *USBAdapter) initELM(ctx context.Context) error {
+	u.report("Resetting ELM327")
 	cmds := []string{
-		"ATZ",  // reset
-		"ATE0", // echo off
-		"ATL0", // no linefeeds
-		"ATS0", // no spaces
-		"ATH0", // headers off
+		"ATZ",   // reset
+		"ATE0",  // echo off
+		"ATL0",  // no linefeeds
+		"ATS0",  // no spaces
+		"ATH0",  // headers off
 		"ATSP0", // auto protocol
 	}
 	for _, c := range cmds {
-		if _, err := u.command(context.Background(), c); err != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		u.report("Adapter " + c)
+		if _, err := u.command(ctx, c); err != nil {
 			return fmt.Errorf("init %s: %w", c, err)
 		}
 	}
@@ -195,46 +238,56 @@ func (u *USBAdapter) readVIN(ctx context.Context) (string, error) {
 
 func (u *USBAdapter) command(ctx context.Context, cmd string) (string, error) {
 	u.mu.Lock()
-	defer u.mu.Unlock()
-	if u.port == nil || u.rw == nil {
+	port := u.port
+	rw := u.rw
+	u.mu.Unlock()
+	if port == nil || rw == nil {
 		return "", fmt.Errorf("adapter not open")
 	}
 
-	_ = u.port.ResetInputBuffer()
-	if _, err := io.WriteString(u.rw, cmd+"\r"); err != nil {
+	_ = port.ResetInputBuffer()
+	if _, err := io.WriteString(rw, cmd+"\r"); err != nil {
 		return "", err
 	}
-	if err := u.rw.Flush(); err != nil {
+	if err := rw.Flush(); err != nil {
 		return "", err
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
+	per := 1500 * time.Millisecond
+	if cmd == "ATZ" {
+		per = 4 * time.Second
+	}
+	deadline := time.Now().Add(per)
 	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
 		deadline = dl
 	}
 
-	var b strings.Builder
-	for time.Now().Before(deadline) {
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
-		default:
+			_ = port.Close()
+		case <-done:
 		}
-		_ = u.port.SetReadTimeout(200 * time.Millisecond)
-		line, err := u.rw.ReadString('>')
+	}()
+
+	var b strings.Builder
+	for time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		_ = port.SetReadTimeout(200 * time.Millisecond)
+		line, err := rw.ReadString('>')
 		if len(line) > 0 {
 			b.WriteString(line)
 			if strings.Contains(line, ">") {
 				break
 			}
 		}
-		if err == nil {
-			continue
-		}
 		if err == io.EOF {
 			break
 		}
-		// timeout: keep reading until deadline
 	}
 	out := b.String()
 	out = strings.ReplaceAll(out, cmd, "")
@@ -249,8 +302,12 @@ func (u *USBAdapter) command(ctx context.Context, cmd string) (string, error) {
 	return out, nil
 }
 
-// ListUSBSerialDevices returns likely OBD adapter device nodes on Linux.
+// ListUSBSerialDevices returns likely OBD adapter ports.
+// Linux: /dev/ttyUSB* and /dev/ttyACM*. Windows: COM ports from the OS.
 func ListUSBSerialDevices() ([]string, error) {
+	if runtime.GOOS == "windows" {
+		return serial.GetPortsList()
+	}
 	patterns := []string{
 		"/dev/ttyUSB*",
 		"/dev/ttyACM*",
