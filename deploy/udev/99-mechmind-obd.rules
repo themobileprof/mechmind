@@ -4,8 +4,9 @@
 #   sudo udevadm control --reload-rules
 #   sudo udevadm trigger
 #
-# Then use: --device /dev/obd0
+# Then use: --device /dev/obd0  (ELM-class). OpenPort clones get /dev/obd-j2534 (not scannable yet).
 
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="cc4d", SYMLINK+="obd-j2534", MODE="0660", GROUP="dialout"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="obd0", MODE="0660", GROUP="dialout"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="obd0", MODE="0660", GROUP="dialout"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="obd0", MODE="0660", GROUP="dialout"

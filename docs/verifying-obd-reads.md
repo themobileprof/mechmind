@@ -44,6 +44,20 @@ Failure modes that are **honest** (good signals):
 - ELM327 timeout / `UNABLE TO CONNECT`
 - VIN missing from Mode 09 (some ECUs need ignition ON, protocol set, or multi-frame support)
 
+## Adapter classes
+
+MechMind’s USB path speaks **ELM327 AT commands** (the second dongle that answered `ELM327 v1.5`).
+
+A **Tactrix OpenPort 2.0** (including Revision E clones) is a **J2534** pass-through. It often shows up as `/dev/ttyACM0` too, but it will not answer `ATI`/`ATZ`. MechMind **detects** typical OpenPort USB IDs (`0403:cc4d` or a Tactrix/OpenPort product string) and refuses the ELM scan path instead of hanging.
+
+| Dongle | Speaks | Use with MechMind today |
+|---|---|---|
+| ELM327 / STN11xx USB | AT commands + Mode 01/03/09 | Yes |
+| OpenPort 2.0 / J2534 | PassThru API (not ELM) | Not yet |
+| Bluetooth ELM | Same as USB ELM | Later |
+
+Keep the ELM327-class adapter for Phase 1 live scans. OpenPort is a better *future* OEM/J2534 path, not a drop-in for the current client.
+
 ## Mock is for software only
 
 ```bash

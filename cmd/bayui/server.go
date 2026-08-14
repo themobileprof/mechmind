@@ -58,7 +58,7 @@ func (b *bayServer) serveIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *bayServer) handleState(w http.ResponseWriter, r *http.Request) {
-	devs, _ := obd.ListUSBSerialDevices()
+	devs, _ := obd.ListSerialPorts()
 	b.mu.Lock()
 	apiURL := b.apiURL
 	tok := b.token
@@ -96,7 +96,7 @@ func (b *bayServer) handleState(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *bayServer) handleDevices(w http.ResponseWriter, _ *http.Request) {
-	devs, err := obd.ListUSBSerialDevices()
+	devs, err := obd.ListSerialPorts()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -420,14 +420,16 @@ func (b *bayServer) buildAdapter(mock bool, device string, baud int, progress fu
 	}
 	path := strings.TrimSpace(device)
 	if path == "" {
-		devs, err := obd.ListUSBSerialDevices()
+		ports, err := obd.ListSerialPorts()
 		if err != nil {
 			return nil, err
 		}
-		if len(devs) == 0 {
-			return nil, fmt.Errorf("no USB serial device found — plug in the ELM327, or use mock mode")
+		path, err = firstELMPath(ports)
+		if err != nil {
+			return nil, err
 		}
-		path = devs[0]
+	} else if info := obd.InspectSerialPort(path); info.Kind == obd.KindJ2534OpenPort {
+		return nil, fmt.Errorf("%w (%s)", obd.ErrJ2534Unsupported, info.DisplayLabel())
 	}
 	usb := obd.NewUSBAdapter(path)
 	if baud > 0 {
@@ -435,6 +437,24 @@ func (b *bayServer) buildAdapter(mock bool, device string, baud int, progress fu
 	}
 	usb.Progress = progress
 	return usb, nil
+}
+
+func firstELMPath(ports []obd.SerialPort) (string, error) {
+	if len(ports) == 0 {
+		return "", fmt.Errorf("no USB serial device found — plug in the ELM327, or use mock mode")
+	}
+	sawJ2534 := false
+	for _, p := range ports {
+		if p.Kind == obd.KindJ2534OpenPort {
+			sawJ2534 = true
+			continue
+		}
+		return p.Path, nil
+	}
+	if sawJ2534 {
+		return "", obd.ErrJ2534Unsupported
+	}
+	return "", fmt.Errorf("no USB serial device found — plug in the ELM327, or use mock mode")
 }
 
 func (b *bayServer) login(ctx context.Context, email, password string) (string, any, error) {

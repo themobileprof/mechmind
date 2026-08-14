@@ -215,7 +215,7 @@
       </select>
       <button class="ghost" id="btn-refresh" type="button">Refresh ports</button>
       <button class="scan-paddle" id="btn-scan" type="button">Scan vehicle</button>
-      <p class="hint">Ignition ON, wait a couple of seconds after the key. The first ECU talk can sit on “Searching vehicle bus” for up to 15s. Scan stops itself after 50 seconds.</p>
+      <p class="hint" id="adapter-hint">Ignition ON, wait a couple of seconds after the key. The first ECU talk can sit on “Searching vehicle bus” for up to 15s. Scan stops itself after 50 seconds.</p>
     </aside>
     <section class="stage">
       <div id="flash"></div>
@@ -277,16 +277,42 @@
       const sel = $("device");
       const cur = sel.value;
       sel.innerHTML = "";
-      (devs || []).forEach((d) => {
+      const items = (devs || []).map((d) => typeof d === "string" ? { path: d, kind: "unknown", label: d } : d);
+      items.forEach((d) => {
         const o = document.createElement("option");
-        o.value = d; o.textContent = d;
+        o.value = d.path;
+        o.textContent = d.label || d.path;
+        o.dataset.kind = d.kind || "unknown";
         sel.appendChild(o);
       });
-      if (!devs || !devs.length) {
+      if (!items.length) {
         const o = document.createElement("option");
         o.value = ""; o.textContent = "none found";
         sel.appendChild(o);
-      } else if ([...sel.options].some((o) => o.value === cur)) sel.value = cur;
+      } else {
+        const keep = items.some((d) => d.path === cur);
+        if (keep) sel.value = cur;
+        else {
+          const elm = items.find((d) => d.kind !== "j2534_openport");
+          sel.value = (elm || items[0]).path;
+        }
+      }
+      updateAdapterHint();
+    }
+
+    function selectedKind() {
+      const o = $("device").selectedOptions[0];
+      return (o && o.dataset.kind) || "";
+    }
+
+    function updateAdapterHint() {
+      const hint = $("adapter-hint");
+      if (!hint) return;
+      if (selectedKind() === "j2534_openport") {
+        hint.textContent = "This port is a Tactrix OpenPort / J2534 adapter, not ELM327. MechMind cannot scan it yet. Plug in the ELM327-class dongle (the one that answered ELM327 v1.5).";
+      } else {
+        hint.textContent = "Ignition ON, wait a couple of seconds after the key. The first ECU talk can sit on “Searching vehicle bus” for up to 15s. Scan stops itself after 50 seconds.";
+      }
     }
 
     function setScanButton(running) {
@@ -359,6 +385,7 @@
     }
 
     $("btn-refresh").onclick = refresh;
+    $("device").onchange = updateAdapterHint;
     $("btn-login").onclick = async () => {
       flash("");
       try {
@@ -391,6 +418,10 @@
       if (scanning) {
         try { await jfetch("/local/scan/cancel", { method: "POST", body: "{}" }); }
         catch (e) { flash(e.message, true); }
+        return;
+      }
+      if (selectedKind() === "j2534_openport") {
+        flash("OpenPort / J2534 is detected but not supported yet. Use the ELM327-class adapter.", true);
         return;
       }
       try {

@@ -18,25 +18,25 @@ import (
 
 func main() {
 	var (
-		mock     = flag.Bool("mock", false, "use mock adapter (no hardware)")
-		device   = flag.String("device", "", "USB serial device path (e.g. /dev/ttyUSB0)")
-		baud     = flag.Int("baud", 38400, "serial baud rate (common: 9600, 38400, 115200)")
-		list     = flag.Bool("list", false, "list candidate USB serial devices")
-		vin      = flag.String("vin", "", "override / mock VIN")
-		codes    = flag.String("codes", "P0300,P0171", "comma-separated mock DTC codes")
-		apiURL   = flag.String("api", envOr("API_URL", "http://localhost:8080"), "API base URL (required)")
-		email    = flag.String("email", envOr("AUTOSERVICE_EMAIL", ""), "technician email for login")
-		password = flag.String("password", envOr("AUTOSERVICE_PASSWORD", ""), "technician password for login")
-		token    = flag.String("token", "", "JWT bearer token (skips login if set)")
-		loginOnly = flag.Bool("login", false, "login and save token, then exit")
-		timeout  = flag.Duration("timeout", 20*time.Second, "scan timeout")
-		noUpload = flag.Bool("no-upload", false, "scan only; do not upload (discouraged — API is the system of record)")
+		mock             = flag.Bool("mock", false, "use mock adapter (no hardware)")
+		device           = flag.String("device", "", "USB serial device path (e.g. /dev/ttyUSB0)")
+		baud             = flag.Int("baud", 38400, "serial baud rate (common: 9600, 38400, 115200)")
+		list             = flag.Bool("list", false, "list candidate USB serial devices")
+		vin              = flag.String("vin", "", "override / mock VIN")
+		codes            = flag.String("codes", "P0300,P0171", "comma-separated mock DTC codes")
+		apiURL           = flag.String("api", envOr("API_URL", "http://localhost:8080"), "API base URL (required)")
+		email            = flag.String("email", envOr("AUTOSERVICE_EMAIL", ""), "technician email for login")
+		password         = flag.String("password", envOr("AUTOSERVICE_PASSWORD", ""), "technician password for login")
+		token            = flag.String("token", "", "JWT bearer token (skips login if set)")
+		loginOnly        = flag.Bool("login", false, "login and save token, then exit")
+		timeout          = flag.Duration("timeout", 20*time.Second, "scan timeout")
+		noUpload         = flag.Bool("no-upload", false, "scan only; do not upload (discouraged — API is the system of record)")
 		allowVINOverride = flag.Bool("allow-vin-override", false, "permit --vin to replace ECU-reported VIN (never use when validating OBD hardware)")
 	)
 	flag.Parse()
 
 	if *list {
-		devs, err := obd.ListUSBSerialDevices()
+		devs, err := obd.ListSerialPorts()
 		if err != nil {
 			fatal(err)
 		}
@@ -45,7 +45,7 @@ func main() {
 			return
 		}
 		for _, d := range devs {
-			fmt.Println(d)
+			fmt.Println(d.DisplayLabel())
 		}
 		return
 	}
@@ -93,15 +93,28 @@ func main() {
 	default:
 		path := *device
 		if path == "" {
-			devs, err := obd.ListUSBSerialDevices()
+			ports, err := obd.ListSerialPorts()
 			if err != nil {
 				fatal(err)
 			}
-			if len(devs) == 0 {
+			if len(ports) == 0 {
 				fatal(fmt.Errorf("no USB serial device found; pass --device or use --mock"))
 			}
-			path = devs[0]
+			picked := ""
+			for _, p := range ports {
+				if p.Kind == obd.KindJ2534OpenPort {
+					continue
+				}
+				picked = p.Path
+				break
+			}
+			if picked == "" {
+				fatal(obd.ErrJ2534Unsupported)
+			}
+			path = picked
 			fmt.Fprintf(os.Stderr, "using device %s\n", path)
+		} else if info := obd.InspectSerialPort(path); info.Kind == obd.KindJ2534OpenPort {
+			fatal(fmt.Errorf("%w (%s)", obd.ErrJ2534Unsupported, info.DisplayLabel()))
 		}
 		usb := obd.NewUSBAdapter(path)
 		usb.Baud = *baud
@@ -191,12 +204,12 @@ func apiLogin(ctx context.Context, base, email, password string) (string, error)
 
 func uploadScan(ctx context.Context, base, token string, result *obd.ScanResult) (map[string]any, error) {
 	body := map[string]any{
-		"vin":           result.Vehicle.VIN,
-		"link_type":     result.LinkType,
-		"adapter_name":  result.AdapterName,
-		"protocol":      result.Protocol,
-		"dtcs":          result.DTCs,
-		"observations":  result.Observations,
+		"vin":          result.Vehicle.VIN,
+		"link_type":    result.LinkType,
+		"adapter_name": result.AdapterName,
+		"protocol":     result.Protocol,
+		"dtcs":         result.DTCs,
+		"observations": result.Observations,
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {

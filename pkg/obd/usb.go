@@ -83,6 +83,9 @@ func (u *USBAdapter) Open(ctx context.Context) error {
 	if u.DevicePath == "" {
 		return fmt.Errorf("usb device path is required")
 	}
+	if info := InspectSerialPort(u.DevicePath); info.Kind == KindJ2534OpenPort {
+		return fmt.Errorf("%w (%s %s:%s %s)", ErrJ2534Unsupported, info.Path, info.VID, info.PID, info.Product)
+	}
 
 	var last error
 	bauds := u.baudCandidates()
