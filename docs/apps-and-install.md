@@ -198,7 +198,7 @@ See [verifying-obd-reads.md](verifying-obd-reads.md).
 Technician install (no Go on the laptop):
 
 ```bash
-sudo ./scripts/install-ubuntu.sh
+./scripts/install-ubuntu.sh
 # then open “MechMind Bay” from the app menu
 ```
 
@@ -290,7 +290,7 @@ sudo install -m 755 bin/bayui      /usr/local/bin/mechmind-bayui
 cp .env.example .env          # set JWT_SECRET + bootstrap admin
 make migrate
 make api                      # terminal 1 — API must stay running
-sudo ./scripts/install-ubuntu.sh
+./scripts/install-ubuntu.sh
 # then open “MechMind Bay” from the app menu
 ```
 

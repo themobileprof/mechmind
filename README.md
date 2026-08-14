@@ -25,7 +25,7 @@ cp .env.example .env    # set JWT_SECRET and BOOTSTRAP_ADMIN_*
 make migrate
 make api                # http://localhost:8080
 
-sudo ./scripts/install-ubuntu.sh   # .deb → “MechMind Bay” in the app menu
+./scripts/install-ubuntu.sh        # .deb → “MechMind Bay” in the app menu
 ```
 
 Register a shop first if needed:
@@ -68,7 +68,7 @@ Do not override a real car’s VIN when proving the USB link. Mock always uses `
 
 ```bash
 make mock-scan                             # software only
-sudo ./scripts/install-ubuntu.sh           # then open MechMind Bay → Live USB
+./scripts/install-ubuntu.sh                # then open MechMind Bay → Live USB
 ```
 
 Details: [docs/verifying-obd-reads.md](docs/verifying-obd-reads.md), [docs/bay-ui.md](docs/bay-ui.md)

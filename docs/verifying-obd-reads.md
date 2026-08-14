@@ -29,7 +29,7 @@ go run ./cmd/obdctl --list
 go run ./cmd/obdctl --device /dev/ttyUSB0
 ```
 
-Or install **MechMind Bay** (`sudo ./scripts/install-ubuntu.sh`) and choose **Live USB** — same rules: no VIN typing, no mock.
+Or install **MechMind Bay** (`./scripts/install-ubuntu.sh`) and choose **Live USB** — same rules: no VIN typing, no mock.
 
 Success looks like:
 

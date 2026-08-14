@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Install MechMind Bay on this Ubuntu machine (builds the .deb if needed).
+# Run as your user:  ./scripts/install-ubuntu.sh
+# Do not prefix the whole script with sudo — that hides Go from PATH.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-if ! command -v dpkg-deb >/dev/null; then
-  echo "dpkg-deb is required (Ubuntu/Debian)." >&2
-  exit 1
+if [[ "$(id -u)" -eq 0 && -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+  echo "Building the .deb as $SUDO_USER (not root)."
+  sudo -u "$SUDO_USER" -H "$ROOT/scripts/install-ubuntu.sh"
+  exit $?
 fi
 
 ARCH="$(dpkg --print-architecture)"
@@ -21,7 +24,11 @@ fi
 
 echo "== installing $DEB =="
 # dpkg -i only. Do not run apt-get -f — that can change unrelated packages.
-sudo dpkg -i "$DEB"
+if [[ "$(id -u)" -eq 0 ]]; then
+  dpkg -i "$DEB"
+else
+  sudo dpkg -i "$DEB"
+fi
 
 echo
 echo "Launch: MechMind Bay in the app menu, or: mechmind-bayui"

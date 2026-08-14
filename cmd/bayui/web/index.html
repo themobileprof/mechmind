@@ -40,8 +40,13 @@
       font-family: "Share Tech Mono", monospace; font-size: 0.78rem;
       border: 1px solid var(--line); padding: 0.45rem 0.7rem; color: var(--muted);
     }
-    .status-pill.ok { color: var(--ok); border-color: rgba(143,191,106,.45); }
-    .status-pill.bad { color: var(--fault); border-color: rgba(232,93,76,.5); }
+    .head-actions { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; justify-content: flex-end; }
+    .quit {
+      font-family: Tektur, sans-serif; letter-spacing: 0.1em; text-transform: uppercase;
+      background: transparent; color: var(--fault); border: 1px solid var(--fault);
+      padding: 0.45rem 0.75rem; cursor: pointer;
+    }
+    .quit:hover { background: rgba(232,93,76,.12); }
     main {
       display: grid;
       grid-template-columns: 22rem 1fr;
@@ -151,7 +156,10 @@
       <div class="mark">MechMind · local bay</div>
       <h1>Scan console</h1>
     </div>
-    <div id="pills"></div>
+    <div class="head-actions">
+      <div id="pills"></div>
+      <button type="button" class="quit" id="btn-quit">Quit Bay</button>
+    </div>
   </header>
   <main>
     <aside class="rail">
@@ -200,13 +208,14 @@
       <select id="device"></select>
       <label>Baud</label>
       <select id="baud">
-        <option>38400</option>
-        <option>9600</option>
-        <option>115200</option>
+        <option value="0">Auto (try 38400 / 115200 / 9600)</option>
+        <option value="38400">38400</option>
+        <option value="115200">115200</option>
+        <option value="9600">9600</option>
       </select>
       <button class="ghost" id="btn-refresh" type="button">Refresh ports</button>
       <button class="scan-paddle" id="btn-scan" type="button">Scan vehicle</button>
-      <p class="hint">Ignition ON. Do not type a VIN — the ECU must report it. A live scan stops itself after 20 seconds if the adapter does not finish.</p>
+      <p class="hint">Ignition ON, wait a couple of seconds after the key. The first ECU talk can sit on “Searching vehicle bus” for up to 15s. Scan stops itself after 50 seconds.</p>
     </aside>
     <section class="stage">
       <div id="flash"></div>
@@ -296,14 +305,14 @@
 
     function showProgress(st) {
       const elapsed = st.elapsed_ms || 0;
-      const timeout = st.timeout_ms || 20000;
+      const timeout = st.timeout_ms || 50000;
       const pct = Math.min(100, Math.round((elapsed / timeout) * 100));
       const log = (st.log || []).join("\n") || "Waiting…";
       $("result").innerHTML = `
         <p class="phase-now">${esc(st.phase || "Working")} · ${(elapsed/1000).toFixed(1)}s / ${(timeout/1000).toFixed(0)}s</p>
         <div class="meter"><i style="width:${pct}%"></i></div>
         <div class="logbox">${esc(log)}</div>
-        <p class="hint">Each line is a real adapter or API step. If this hits 20s, the scan stops by itself.</p>`;
+        <p class="hint">Each line is a real adapter or API step. “Searching vehicle bus” can take up to 15s. The whole scan stops at 50s.</p>`;
     }
 
     async function pollScan() {
@@ -461,6 +470,21 @@
       });
       box.innerHTML = html;
     }
+
+    $("btn-quit").onclick = async () => {
+      if (!window.confirm("Stop MechMind Bay on this computer?\nUSB scanning will stop. Sign-in is kept for next time.")) {
+        return;
+      }
+      stopPoll();
+      try {
+        await jfetch("/local/quit", { method: "POST", body: "{}" });
+      } catch (_) { /* process may close before the response arrives */ }
+      document.body.innerHTML = `<main style="padding:3rem 2rem;max-width:36rem">
+        <div class="mark">MechMind</div>
+        <h1>Bay stopped</h1>
+        <p class="hint">The local scanner process has quit. Close this tab. Open <strong>MechMind Bay</strong> from the app menu to start again.</p>
+      </main>`;
+    };
 
     refresh().catch((e) => flash(e.message, true));
   </script>

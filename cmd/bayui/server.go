@@ -23,6 +23,7 @@ type bayServer struct {
 	apiURL string
 	token  string
 	http   *http.Client
+	srv    *http.Server
 
 	jobMu sync.Mutex
 	job   *scanJob
@@ -203,7 +204,7 @@ func (b *bayServer) handleScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	const budget = 20 * time.Second
+	const budget = 50 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 
 	b.jobMu.Lock()
@@ -239,26 +240,42 @@ func (b *bayServer) handleScanStatus(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (b *bayServer) handleScanCancel(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cancelled": b.stopScan()})
+}
+
+func (b *bayServer) handleQuit(w http.ResponseWriter, _ *http.Request) {
+	b.stopScan()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "quitting": true})
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		if b.srv == nil {
+			os.Exit(0)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = b.srv.Shutdown(ctx)
+	}()
+}
+
+func (b *bayServer) stopScan() bool {
 	b.jobMu.Lock()
 	job := b.job
 	b.jobMu.Unlock()
 	if job == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cancelled": false})
-		return
+		return false
 	}
 	job.mu.Lock()
 	busy := job.busy
 	cancel := job.cancel
 	job.mu.Unlock()
 	if !busy {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cancelled": false})
-		return
+		return false
 	}
 	if cancel != nil {
 		cancel()
 	}
 	b.note("Cancel requested")
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cancelled": true})
+	return true
 }
 
 func (b *bayServer) note(phase string) {
@@ -287,7 +304,7 @@ func (b *bayServer) jobStatus() map[string]any {
 		"phase":      "",
 		"log":        []string{},
 		"elapsed_ms": 0,
-		"timeout_ms": 20000,
+		"timeout_ms": 50000,
 	}
 	if job == nil {
 		return out
